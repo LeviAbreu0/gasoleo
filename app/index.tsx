@@ -3,7 +3,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useData } from "@/context/DataContext";
 
-const { width } = Dimensions.get("window"); // largura da tela
+const { width } = Dimensions.get("window");
 
 export default function Index() {
   const router = useRouter();
@@ -61,7 +61,8 @@ export default function Index() {
           <Text style={styles.iconText}>Óleo</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.iconContainer}>
+        <TouchableOpacity style={styles.iconContainer}
+        onPress={() => router.push("/relatorio")}>
           <Image
             source={require("@/assets/images/relatory-icon.png")}
             style={styles.icon}
@@ -119,10 +120,10 @@ const styles = StyleSheet.create({
   iconContainer: {
     alignItems: "center",
     marginVertical: 10,
-    width: width / 4 - 10, // cada ícone ocupa 1/4 da tela menos uma margem
+    width: width / 4 - 10, 
   },
   icon: { width: "100%", height: undefined, aspectRatio: 1 },
   iconText: { fontSize: 14, color: "#000", textAlign: "center" },
   adContainer: { alignItems: "center", marginTop: 30 },
-  ad: { width: width * 0.7, height: width * 0.7 }, // anúncio proporcional à tela
+  ad: { width: width * 0.7, height: width * 0.7 }, 
 });

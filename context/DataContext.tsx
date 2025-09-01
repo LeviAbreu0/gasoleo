@@ -1,35 +1,45 @@
+// DataContext.tsx
 import React, { createContext, useState, useContext } from "react";
 
+export type FuelData = { date: string; liters: string; km: string; price: string };
+// kmTroca aceitando number ou string para evitar erros de tipagem dependendo do componente
+export type OilData = {
+  date: string;
+  km: string;
+  type?: string;
+  price?: string;
+  kmTroca?: number | string;
+};
+
 type DataType = {
-  lastFuel: {
-    date: string;
-    liters: string;
-    km: string;
-  } | null;
-  lastOil: {
-    date: string;
-    km: string;
-  } | null;
-  setLastFuel: (data: { date: string; liters: string; km: string }) => void;
-  setLastOil: (data: { date: string; km: string }) => void;
+  fuelHistory: FuelData[];
+  oilHistory: OilData[];
+  lastFuel: FuelData | null;
+  lastOil: OilData | null;
+  addFuel: (data: FuelData) => void;
+  addOil: (data: OilData) => void;
 };
 
 const DataContext = createContext<DataType | undefined>(undefined);
 
 export const DataProvider = ({ children }: { children: React.ReactNode }) => {
-  const [lastFuel, setLastFuelData] = useState<DataType["lastFuel"]>(null);
-  const [lastOil, setLastOilData] = useState<DataType["lastOil"]>(null);
+  const [fuelHistory, setFuelHistory] = useState<FuelData[]>([]);
+  const [oilHistory, setOilHistory] = useState<OilData[]>([]);
+  const [lastFuel, setLastFuel] = useState<FuelData | null>(null);
+  const [lastOil, setLastOil] = useState<OilData | null>(null);
 
-  const setLastFuel = (data: { date: string; liters: string; km: string }) => {
-    setLastFuelData(data);
+  const addFuel = (data: FuelData) => {
+    setFuelHistory(prev => [data, ...prev]);
+    setLastFuel(data);
   };
 
-  const setLastOil = (data: { date: string; km: string }) => {
-    setLastOilData(data);
+  const addOil = (data: OilData) => {
+    setOilHistory(prev => [data, ...prev]);
+    setLastOil(data);
   };
 
   return (
-    <DataContext.Provider value={{ lastFuel, lastOil, setLastFuel, setLastOil }}>
+    <DataContext.Provider value={{ fuelHistory, oilHistory, lastFuel, lastOil, addFuel, addOil }}>
       {children}
     </DataContext.Provider>
   );
