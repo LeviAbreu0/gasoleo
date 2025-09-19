@@ -80,7 +80,7 @@ export default function Gas() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  container: { marginTop: 10, marginLeft: 10, fontWeight: "400" },
+  container: { marginTop: 10, marginLeft: 10, fontWeight: "500" },
   infotable: { backgroundColor: "#e5e5e5", margin: 20, padding: 15, borderRadius: 8 },
   title: { fontSize: 16, fontWeight: "500" },
   button: { alignSelf: 'center', marginTop: 20 },
