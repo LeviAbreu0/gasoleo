@@ -1,58 +1,243 @@
-// histórico.tsx
-import React, { useMemo } from "react";
-import { StyleSheet, Text, View, FlatList, Dimensions } from "react-native";
+import React, {
+  useMemo,
+  useCallback,
+  useState,
+  useEffect,
+} from "react";
+import {
+  StyleSheet,
+  Text,
+  View,
+  FlatList,
+  Dimensions,
+  Modal,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+  RefreshControl,
+  ActivityIndicator,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Picker } from "@react-native-picker/picker";
+import { useFocusEffect } from "@react-navigation/native";
 import { useData } from "@/context/DataContext";
+import { HistoryRow } from "@/components/HistoryRow";
+import DataInput from "@/components/DataInput";
+import NumberInput from "@/components/NumberInput";
+import { parseEntryDateToLocalDate, compareNewestFirst } from "@/lib/date";
+import { toNumber } from "@/lib/numbers";
+import { TIPOS_OLEO_KM } from "@/constants/oilTypes";
 
 const { width } = Dimensions.get("window");
 
-function parseBRDate(d: string) {
-  const iso = new Date(d);
-  if (!isNaN(iso.getTime())) return iso;
-  const m = /^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/.exec(String(d));
-  if (m) {
-    const [, dd, mm, yyyy] = m;
-    return new Date(Number(yyyy), Number(mm) - 1, Number(dd));
-  }
-  return new Date(NaN);
-}
+type Combined = {
+  key: string;
+  kind: "fuel" | "oil";
+  id: string;
+  type: string;
+  typeLabel: string;
+  date: string;
+  liters?: string;
+  km?: string;
+  price?: string;
+  oilType?: string;
+};
 
-function toNumber(v: any) {
-  if (typeof v === "number") return v;
-  if (v == null || v === "") return 0;
-  const n = parseFloat(String(v).replace(",", "."));
-  return isFinite(n) ? n : 0;
-}
+type EditFuel = {
+  kind: "fuel";
+  id: string;
+  date: string;
+  liters: string;
+  km: string;
+  price: string;
+};
+
+type EditOil = {
+  kind: "oil";
+  id: string;
+  date: string;
+  km: string;
+  type: string;
+  price: string;
+  kmTroca: string;
+};
 
 export default function Historico() {
-  const { fuelHistory, oilHistory } = useData();
+  const {
+    fuelHistory,
+    oilHistory,
+    refresh,
+    refreshing,
+    loading,
+    error,
+    clearError,
+    updateFuel,
+    updateOil,
+    deleteFuel,
+    deleteOil,
+  } = useData();
 
-  // Junta os registros e ordena por data decrescente
+  const [modalOpen, setModalOpen] = useState(false);
+  const [edit, setEdit] = useState<EditFuel | EditOil | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refresh();
+    }, [refresh])
+  );
+
   const allEntries = useMemo(() => {
-    const combined = [
-      ...(Array.isArray(fuelHistory) ? fuelHistory.map(e => ({...e, type: "Gasolina"})) : []),
-      ...(Array.isArray(oilHistory) ? oilHistory.map(e => ({...e, type: "Óleo"})) : []),
-    ];
+    const fuelRows: Combined[] = (fuelHistory || []).map((e) => ({
+      key: `fuel-${e.id}`,
+      kind: "fuel",
+      id: e.id,
+      type: "Gasolina",
+      typeLabel: "Gasolina",
+      date: e.date,
+      liters: e.liters,
+      km: e.km,
+      price: e.price,
+    }));
 
+    const oilRows: Combined[] = (oilHistory || []).map((e) => ({
+      key: `oil-${e.id}`,
+      kind: "oil",
+      id: e.id,
+      type: "Óleo",
+      typeLabel: e.type ? `Óleo (${e.type})` : "Óleo",
+      date: e.date,
+      km: e.km,
+      price: e.price,
+      oilType: e.type,
+    }));
+
+    const combined = [...fuelRows, ...oilRows];
     combined.sort((a, b) => {
-      const dateA = parseBRDate(a.date ?? a.date ?? "");
-      const dateB = parseBRDate(b.date ?? b.date ?? "");
-      return dateB.getTime() - dateA.getTime();
+      const da = parseEntryDateToLocalDate(a.date);
+      const db = parseEntryDateToLocalDate(b.date);
+      const t = db.getTime() - da.getTime();
+      if (t !== 0) return t;
+      return compareNewestFirst(
+        { date: a.date, id: a.id },
+        { date: b.date, id: b.id }
+      );
     });
 
     return combined;
   }, [fuelHistory, oilHistory]);
 
-  const renderItem = ({ item }: any) => (
-    <View style={styles.itemContainer}>
-      <Text style={styles.type}>{item.type}</Text>
-      <Text style={styles.date}>{item.date ?? item.data}</Text>
-      <Text style={styles.value}>
-        {item.liters ? `${item.liters} L • ${item.km} km` : `${item.km} km`}
-        {item.price || item.valor ? ` • R$ ${toNumber(item.price ?? item.valor).toFixed(2)}` : ""}
-      </Text>
-    </View>
-  );
+  useEffect(() => {
+    if (!edit) return;
+    const still = allEntries.find((e) => e.id === edit.id && e.kind === edit.kind);
+    if (!still) {
+      setModalOpen(false);
+      setEdit(null);
+    }
+  }, [allEntries, edit]);
+
+  const openEdit = (item: Combined) => {
+    if (item.kind === "fuel") {
+      setEdit({
+        kind: "fuel",
+        id: item.id,
+        date: item.date,
+        liters: item.liters ?? "",
+        km: item.km ?? "",
+        price: item.price ?? "",
+      });
+    } else {
+      const oil = oilHistory.find((o) => o.id === item.id);
+      setEdit({
+        kind: "oil",
+        id: item.id,
+        date: item.date,
+        km: item.km ?? "",
+        type: oil?.type ?? "",
+        price: oil?.price ?? "",
+        kmTroca: oil?.kmTroca != null ? String(oil.kmTroca) : "",
+      });
+    }
+    setModalOpen(true);
+  };
+
+  const confirmDelete = (item: Combined) => {
+    Alert.alert(
+      "Excluir registro",
+      "Tem certeza? Esta ação não pode ser desfeita.",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Excluir",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              try {
+                if (item.kind === "fuel") await deleteFuel(item.id);
+                else await deleteOil(item.id);
+              } catch (e) {
+                Alert.alert(
+                  "Erro",
+                  e instanceof Error ? e.message : "Falha ao excluir."
+                );
+              }
+            })();
+          },
+        },
+      ]
+    );
+  };
+
+  const saveEdit = async () => {
+    if (!edit) return;
+    try {
+      setSaving(true);
+      if (edit.kind === "fuel") {
+        await updateFuel(edit.id, {
+          date: edit.date,
+          liters: edit.liters,
+          km: edit.km,
+          price: edit.price,
+        });
+      } else {
+        await updateOil(edit.id, {
+          date: edit.date,
+          km: edit.km,
+          type: edit.type,
+          price: edit.price,
+          kmTroca: edit.kmTroca || undefined,
+        });
+      }
+      setModalOpen(false);
+      setEdit(null);
+    } catch (e) {
+      Alert.alert(
+        "Erro",
+        e instanceof Error ? e.message : "Não foi possível salvar."
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const renderItem = ({ item }: { item: Combined }) => {
+    const priceNum = toNumber(item.price);
+    const detail = item.liters
+      ? `${item.liters} L • ${item.km} km${item.price ? ` • R$ ${priceNum.toFixed(2)}` : ""}`
+      : `${item.km} km${item.price ? ` • R$ ${priceNum.toFixed(2)}` : ""}`;
+
+    return (
+      <HistoryRow
+        typeLabel={item.typeLabel}
+        date={item.date}
+        detail={detail}
+        onEdit={() => openEdit(item)}
+        onDelete={() => confirmDelete(item)}
+      />
+    );
+  };
+
+  const keyExtractor = (item: Combined) => item.key;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -60,18 +245,134 @@ export default function Historico() {
         <Text style={styles.title}>Histórico de Gastos Óleo e Gasolina</Text>
       </View>
 
-      {allEntries.length === 0 ? (
+      {error ? (
+        <TouchableOpacity style={styles.errBar} onPress={clearError}>
+          <Text style={styles.errText}>{error} (toque para fechar)</Text>
+        </TouchableOpacity>
+      ) : null}
+
+      {loading && allEntries.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <ActivityIndicator size="large" color="#6A00FF" />
+        </View>
+      ) : allEntries.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>Nenhum registro encontrado.</Text>
         </View>
       ) : (
         <FlatList
           data={allEntries}
-          keyExtractor={(item, index) => `${item.type}-${item.date ?? index}`}
+          keyExtractor={keyExtractor}
           renderItem={renderItem}
           contentContainerStyle={styles.list}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={refresh} />
+          }
+          initialNumToRender={14}
+          windowSize={7}
+          removeClippedSubviews
         />
       )}
+
+      <Modal visible={modalOpen} animationType="slide" transparent>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>
+              {edit?.kind === "fuel" ? "Editar abastecimento" : "Editar óleo"}
+            </Text>
+            <ScrollView keyboardShouldPersistTaps="handled">
+              {edit?.kind === "fuel" ? (
+                <>
+                  <Text style={styles.fieldLabel}>Data</Text>
+                  <DataInput
+                    value={edit.date}
+                    onChange={(v) => setEdit({ ...edit, date: v })}
+                  />
+                  <Text style={styles.fieldLabel}>Litros</Text>
+                  <NumberInput
+                    value={edit.liters}
+                    onChange={(v) => setEdit({ ...edit, liters: v })}
+                  />
+                  <Text style={styles.fieldLabel}>Preço</Text>
+                  <NumberInput
+                    value={edit.price}
+                    onChange={(v) => setEdit({ ...edit, price: v })}
+                  />
+                  <Text style={styles.fieldLabel}>Km</Text>
+                  <NumberInput
+                    value={edit.km}
+                    onChange={(v) => setEdit({ ...edit, km: v })}
+                  />
+                </>
+              ) : null}
+
+              {edit?.kind === "oil" ? (
+                <>
+                  <Text style={styles.fieldLabel}>Data</Text>
+                  <DataInput
+                    value={edit.date}
+                    onChange={(v) => setEdit({ ...edit, date: v })}
+                  />
+                  <Text style={styles.fieldLabel}>Tipo</Text>
+                  <View style={styles.selectBox}>
+                    <Picker
+                      selectedValue={edit.type}
+                      onValueChange={(v) =>
+                        setEdit({
+                          ...edit,
+                          type: v,
+                          kmTroca:
+                            v && TIPOS_OLEO_KM[v] != null
+                              ? String(TIPOS_OLEO_KM[v])
+                              : edit.kmTroca,
+                        })
+                      }
+                    >
+                      <Picker.Item label="Selecione..." value="" />
+                      {Object.keys(TIPOS_OLEO_KM).map((t) => (
+                        <Picker.Item key={t} label={t} value={t} />
+                      ))}
+                    </Picker>
+                  </View>
+                  <Text style={styles.fieldLabel}>Preço</Text>
+                  <NumberInput
+                    value={edit.price}
+                    onChange={(v) => setEdit({ ...edit, price: v })}
+                  />
+                  <Text style={styles.fieldLabel}>Km</Text>
+                  <NumberInput
+                    value={edit.km}
+                    onChange={(v) => setEdit({ ...edit, km: v })}
+                  />
+                </>
+              ) : null}
+            </ScrollView>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalCancel]}
+                onPress={() => {
+                  setModalOpen(false);
+                  setEdit(null);
+                }}
+              >
+                <Text style={styles.modalBtnText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalSave, saving && { opacity: 0.7 }]}
+                disabled={saving}
+                onPress={() => void saveEdit()}
+              >
+                {saving ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.modalBtnText}>Salvar</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -80,16 +381,56 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#fff" },
   header: { padding: 20, borderBottomWidth: 1, borderBottomColor: "#ccc" },
   title: { fontSize: 20, fontWeight: "600" },
-  list: { paddingHorizontal: 20, paddingVertical: 10 },
-  itemContainer: {
-    padding: 15,
-    marginBottom: 10,
-    backgroundColor: "#f6f6f6",
-    borderRadius: 10,
+  list: { paddingHorizontal: 20, paddingVertical: 10, paddingBottom: 40 },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  type: { fontWeight: "700", fontSize: 16, marginBottom: 5 },
-  date: { color: "#666", marginBottom: 5 },
-  value: { fontSize: 14 },
-  emptyContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   emptyText: { fontSize: 16, color: "#888" },
+  errBar: {
+    backgroundColor: "#ffebee",
+    padding: 10,
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 8,
+  },
+  errText: { color: "#b71c1c", fontSize: 13 },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    padding: width * 0.05,
+  },
+  modalCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 16,
+    maxHeight: "90%",
+  },
+  modalTitle: { fontSize: 18, fontWeight: "700", marginBottom: 12 },
+  fieldLabel: { marginTop: 8, fontWeight: "600", fontSize: 14 },
+  selectBox: {
+    borderWidth: 1,
+    borderColor: "#aaa",
+    borderRadius: 6,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 12,
+    marginTop: 16,
+  },
+  modalBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    minWidth: 100,
+    alignItems: "center",
+  },
+  modalCancel: { backgroundColor: "#9e9e9e" },
+  modalSave: { backgroundColor: "#6A00FF" },
+  modalBtnText: { color: "#fff", fontWeight: "600" },
 });
